@@ -1,0 +1,27 @@
+.border-accent {
+    border-color: #3f7e2a !important;
+}
+
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300&display=swap');
+
+* {
+    color: #030303
+}
+
+
+
+body {
+    font-family: 'Noto Sans', sans-serif;
+}
+
+footer {
+    background-color: #3f7e2a !important;
+}
+
+ul {
+    list-style-type: none;
+}
+
+a{
+    color: #3f7e2a;
+}

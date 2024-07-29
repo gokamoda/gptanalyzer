@@ -1,0 +1,48 @@
+[tool.poetry]
+name = "gptanalyzer"
+version = "0.1.2"
+description = ""
+authors = ["gokamoda <gokamoda@gmail.com>"]
+readme = "README.md"
+packages = [{include = "gptanalyzer"}]
+
+[tool.poetry.dependencies]
+python = "3.10.14"
+requests = "^2.31.0"
+hydra-core = "^1.3.2"
+transformers = "4.42.3"
+torchtyping = "^0.1.4"
+seaborn = "^0.13.2"
+numpy = "1.26.4"
+torch = "2.3.1"
+japanize-matplotlib = "^1.1.3"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.2.0"
+isort = "^5.13.2"
+flake8 = "^7.0.0"
+pylint = "^3.0.3"
+pytest = "^8.1.1"
+ipython = "^8.22.2"
+jupyter = "^1.0.0"
+
+
+[tool.pylint]
+source-roots = ["gptanalyzer"]
+
+[tool.pylint.'MESSAGES CONTROL']
+disable = """
+    no-value-for-parameter,
+    missing-module-docstring,
+    abstract-method,
+    too-many-arguments,
+    too-many-instance-attributes,
+"""
+
+[tool.black]
+line-length = 79
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+

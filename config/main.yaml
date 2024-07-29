@@ -1,0 +1,4 @@
+defaults:
+  - mode: dev
+
+save_latest_dir: latest/main
