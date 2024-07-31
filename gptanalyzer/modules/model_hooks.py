@@ -5,11 +5,19 @@ from torch.utils.hooks import RemovableHandle
 from torchtyping import TensorType
 
 from gptanalyzer.models.gpt2 import MyGPT2LMHeadModel
+from gptanalyzer.models.gptneox import MyGPTNeoXForCausalLM
 
 from .my_dataclasses import (BatchHookResultForAttention,
                              BatchHookResultForLayer, BatchHookResultForLN,
                              BatchHookResultForMLP, BatchHookResultForModel)
 from .my_torchtyping import BATCH, HEAD, KEY, QUERY
+
+from gptanalyzer.modules.mylogger import init_logging
+import sys
+
+LOG_PATH = "pytest.log" if "pytest" in sys.modules else "latest.log"
+logger = init_logging(__name__, log_path=LOG_PATH)
+
 
 
 class Hook:
@@ -166,7 +174,8 @@ class HookForMLPDimentionsAblation:
 
 
 def set_observation_hooks(
-    model: MyGPT2LMHeadModel,
+    model: MyGPT2LMHeadModel | MyGPTNeoXForCausalLM,
+    class_field_names: dict[str, str],
     layer_hook: bool,
     attention_hook: bool,
     ln_hook: bool,
@@ -184,44 +193,68 @@ def set_observation_hooks(
     -------
     dict[int, dict[str, Hook]]
     """
-
-    observation_hooks = {
-        str(layer_idx): {} for layer_idx in range(model.config.n_layer)
-    }
+    n_layer = getattr(model.config, class_field_names["n_layer"])
+    observation_hooks = {str(layer_idx): {} for layer_idx in range(n_layer)}
 
     if layer_hook:
-        for layer_idx in range(model.config.n_layer):
+        for layer_idx in range(n_layer):
             observation_hooks[str(layer_idx)]["layer"] = Hook(
-                model.transformer.h[layer_idx].for_hook,
+                getattr(
+                    getattr(model, class_field_names["model_class_name"]),
+                    class_field_names["layer_class_name"],
+                )[layer_idx].for_hook,
                 mode="layer",
             )
 
     if attention_hook:
-        for layer_idx in range(model.config.n_layer):
+        for layer_idx in range(n_layer):
             observation_hooks[str(layer_idx)]["attn"] = Hook(
-                model.transformer.h[layer_idx].attn.for_hook,
+                getattr(
+                    getattr(
+                        getattr(model, class_field_names["model_class_name"]),
+                        class_field_names["layer_class_name"],
+                    )[layer_idx],
+                    class_field_names["attention_class_name"],
+                ).for_hook,
                 mode="attn",
             )
 
     if mlp_hook:
-        for layer_idx in range(model.config.n_layer):
+        for layer_idx in range(n_layer):
             observation_hooks[str(layer_idx)]["mlp"] = Hook(
-                model.transformer.h[layer_idx].mlp.for_hook,
+                getattr(
+                    getattr(model, class_field_names["model_class_name"]),
+                    class_field_names["layer_class_name"],
+                )[layer_idx].mlp.for_hook,
                 mode="mlp",
             )
 
     if ln_hook:
-        for layer_idx in range(model.config.n_layer):
-            observation_hooks[str(layer_idx)]["ln_1"] = Hook(
-                model.transformer.h[layer_idx].ln_1.for_hook,
-                mode="ln",
-            )
-            observation_hooks[str(layer_idx)]["ln_2"] = Hook(
-                model.transformer.h[layer_idx].ln_2.for_hook,
-                mode="ln",
-            )
-        observation_hooks["ln_f"] = Hook(
-            model.transformer.ln_f.for_hook,
+        for layer_idx in range(n_layer):
+            for layer_norm_class_name in class_field_names[
+                "layer_norm_class_names"
+            ]:
+                observation_hooks[str(layer_idx)][layer_norm_class_name] = (
+                    Hook(
+                        getattr(
+                            getattr(
+                                getattr(
+                                    model,
+                                    class_field_names["model_class_name"],
+                                ),
+                                class_field_names["layer_class_name"],
+                            )[layer_idx],
+                            layer_norm_class_name,
+                        ).for_hook,
+                        mode="ln",
+                    )
+                )
+
+        observation_hooks[class_field_names["ln_f"]] = Hook(
+            getattr(
+                getattr(model, class_field_names["model_class_name"]),
+                class_field_names["ln_f"],
+            ).for_hook,
             mode="ln",
         )
 
@@ -230,6 +263,7 @@ def set_observation_hooks(
 
 def get_observation_hooks_results(
     observation_hooks: dict[str, dict[str, Hook]],
+    class_field_names: dict[str, str],
     n_layer: int,
 ) -> BatchHookResultForModel:
     """_summary_
@@ -250,15 +284,20 @@ def get_observation_hooks_results(
     list[BatchHookResultForLayer]
         _description_
     """
+    logger.info(observation_hooks)
     if "layer" in observation_hooks["0"].keys():
         hook_results = [
             observation_hooks[str(layer_idx)]["layer"].result
             for layer_idx in range(n_layer)
         ]
+        logger.info(hook_results)
     else:
         hook_results = [BatchHookResultForLayer() for _ in range(n_layer)]
 
     for layer_idx in range(n_layer):
+        logger.info(layer_idx)
+        logger.info(observation_hooks[str(layer_idx)])
+        logger.info(hook_results[layer_idx])
         if "attn" in observation_hooks[str(layer_idx)].keys():
             hook_results[layer_idx].attn = observation_hooks[str(layer_idx)][
                 "attn"

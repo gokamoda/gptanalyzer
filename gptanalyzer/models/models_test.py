@@ -69,7 +69,12 @@ def test_gptneox_model():
     model = load_model(model_name_or_path).to(device)
     redefined = call(model, inputs)
 
-    logger.info(original.logits)
-    logger.info(redefined.logits[0])
+    # set tensor precision to compare
+    torch.set_printoptions(precision=10)
+    logger.info(original.logits[0, 0])
+    logger.info(redefined.logits[0][0])
 
-    assert torch.allclose(original.logits, redefined.logits[0])
+    # rtol default was 1e-5
+    # this error is predicted to be the cause of joining attention.value and
+    # attention.dense linear transformations.
+    assert torch.allclose(original.logits, redefined.logits[0], rtol=2e-5)

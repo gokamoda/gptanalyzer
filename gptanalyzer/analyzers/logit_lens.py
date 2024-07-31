@@ -4,9 +4,10 @@ import torch
 from torchtyping import TensorType
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
 
-from gptanalyzer.models import MyGPT2LMHeadModel, init_logging
+from gptanalyzer.models import MyGPT2LMHeadModel, MyGPTNeoXForCausalLM
 from gptanalyzer.modules.my_torchtyping import (HIDDEN_DIM, LAYER_PLUS_1,
                                                 SEQUENCE, VOCAB)
+from gptanalyzer.modules import init_logging
 
 LOG_PATH = "pytest.log" if "pytest" in sys.modules else "latest.log"
 logger = init_logging(__name__, log_path=LOG_PATH, clear=True)
@@ -16,18 +17,19 @@ logger = init_logging(__name__, log_path=LOG_PATH, clear=True)
 
 def _logit_lens_redefined_gpt2(
     model: MyGPT2LMHeadModel,
+    class_field_names: dict[str, str],
     hidden_states: TensorType[LAYER_PLUS_1, SEQUENCE, HIDDEN_DIM],
     no_bias: bool = False,
     extended: bool = False,
 ):
     device = model.device
-    lm_head = model.lm_head
+    lm_head = getattr(model, class_field_names["lm_head"])
 
     num_layers, _, _ = hidden_states.shape
     hidden_states = hidden_states.to(device)
     logits_by_layer = []
 
-    layer_norm = model.transformer.ln_f
+    layer_norm = getattr(getattr(model, class_field_names["model_class_name"]), class_field_names["ln_f"])
     if no_bias:
         lm_head.bias = torch.nn.Parameter(torch.zeros(lm_head.bias.shape))
     with torch.no_grad():
@@ -50,6 +52,7 @@ def _logit_lens_redefined_gpt2(
 
 def logit_lens(
     model: MyGPT2LMHeadModel | AutoModelForCausalLM,
+    class_field_names: dict[str, str],
     hidden_states: TensorType[LAYER_PLUS_1, SEQUENCE, HIDDEN_DIM],
     no_bias: bool = False,
     extended: bool = False,
@@ -66,21 +69,22 @@ def logit_lens(
     TensorType[LAYERS_PLUS_1, SEQUENCE, VOCAB]
     """
 
-    device = model.device
-    lm_head = model.lm_head
 
-    num_layers, _, _ = hidden_states.shape
-    hidden_states = hidden_states.to(device)
-    logits_by_layer = []
 
-    if isinstance(model, MyGPT2LMHeadModel):
+    if isinstance(model, (MyGPT2LMHeadModel, MyGPTNeoXForCausalLM)):
         return _logit_lens_redefined_gpt2(
             model=model,
+            class_field_names=class_field_names,
             hidden_states=hidden_states,
             no_bias=no_bias,
             extended=extended,
         )
 
+    device = model.device
+    lm_head = getattr(model, class_field_names["lm_head"])
+    num_layers, _, _ = hidden_states.shape
+    hidden_states = hidden_states.to(device)
+    logits_by_layer = []
     if model.config.architectures[0] == "OPTForCausalLM":
         layer_norm = model.model.decoder.final_layer_norm
     elif isinstance(model, LlamaForCausalLM):

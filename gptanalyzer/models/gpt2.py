@@ -11,8 +11,7 @@ from transformers.models.gpt2.modeling_gpt2 import (GPT2MLP, GPT2Attention,
 from gptanalyzer.modules.my_torchtyping import (BATCH, HEAD, HIDDEN_DIM,
                                                 SEQUENCE)
 from gptanalyzer.modules.mylogger import init_logging
-
-from .hook import ForwardHook
+from gptanalyzer.nn_utils import ForwardHook, MyLayerNorm
 
 torch.set_printoptions(sci_mode=False)
 
@@ -317,53 +316,6 @@ class MyGPT2MLP(GPT2MLP):
         return hidden_states
 
 
-class MyLayerNorm(nn.LayerNorm):
-    """LayerNorm with hooks."""
-
-    def __init__(self, config, collapsed=False):
-        super().__init__(config.hidden_size, eps=config.layer_norm_epsilon)
-        self.mean = None
-        self.var = None
-        self.for_hook = ForwardHook()
-        self.collapsed = collapsed
-
-    # pylint: disable=arguments-renamed
-    def forward(self, hidden_states: torch.FloatTensor) -> torch.FloatTensor:
-        """LN with intervention.
-
-        Parameters
-        ----------
-        hidden_states : torch.FloatTensor
-            _description_
-
-        Returns
-        -------
-        torch.FloatTensor
-            _description_
-        """
-        if self.mean is not None:
-            mean = self.mean
-        else:
-            mean = hidden_states.mean(dim=-1, keepdim=True)
-
-        if self.var is not None:
-            var = self.var
-        else:
-            var = hidden_states.var(dim=-1, unbiased=False, keepdim=True)
-        norm = hidden_states / torch.sqrt(var + 1e-5)
-        self.for_hook(
-            mean=mean.detach().to("cpu"),
-            var=var.detach().to("cpu"),
-        )
-        self.mean = None
-        self.var = None
-        # return norm
-        if self.collapsed:
-            return norm
-
-        return norm * self.weight + self.bias
-
-
 class MyGPT2Block(GPT2Block):
     """GPT2Block with hooks and pre-computed wvo and bvo."""
 
@@ -374,9 +326,9 @@ class MyGPT2Block(GPT2Block):
             config.n_inner if config.n_inner is not None else 4 * hidden_size
         )
 
-        self.ln_1 = MyLayerNorm(config, collapsed=True)
+        self.ln_1 = MyLayerNorm(hidden_size, collapsed=True)
         self.attn = MyGPT2Attention(config, layer_idx=layer_idx)
-        self.ln_2 = MyLayerNorm(config, collapsed=True)
+        self.ln_2 = MyLayerNorm(hidden_size, collapsed=True)
         self.mlp = MyGPT2MLP(intermediate_size=inner_dim, config=config)
         self.for_hook = ForwardHook()
 
@@ -453,7 +405,7 @@ class MyGPT2Model(GPT2Model):
                 for i in range(config.num_hidden_layers)
             ]
         )
-        self.ln_f = MyLayerNorm(config, collapsed=True)
+        self.ln_f = MyLayerNorm(config.hidden_size, collapsed=True)
         self.post_init()
 
 

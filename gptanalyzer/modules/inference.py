@@ -4,6 +4,7 @@ import torch
 from transformers.tokenization_utils_base import BatchEncoding
 
 from gptanalyzer.models.gpt2 import MyGPT2LMHeadModel
+from gptanalyzer.models.gptneox import MyGPTNeoXForCausalLM
 
 from .model_hooks import (Hook, fix_attn_weights,
                           get_observation_hooks_results,
@@ -91,7 +92,8 @@ def attn_weight_repeat(
 
 
 def generate(
-    model: MyGPT2LMHeadModel,
+    model: MyGPT2LMHeadModel | MyGPTNeoXForCausalLM,
+    class_field_names: dict[str, str],
     inputs: BatchEncoding,
     pad_token_id: int,
     attention_hook: bool = False,
@@ -147,6 +149,7 @@ def generate(
     observation_hooks: dict[str, dict[str, Hook]] | None = (
         set_observation_hooks(
             model=model,
+            class_field_names=class_field_names,
             layer_hook=layer_hook,
             attention_hook=attention_hook,
             ln_hook=ln_hook,
@@ -219,7 +222,8 @@ def generate(
         if observation_hooks is None
         else get_observation_hooks_results(
             observation_hooks=observation_hooks,
-            n_layer=model.config.n_layer,
+            class_field_names=class_field_names,
+            n_layer=getattr(model.config, class_field_names["n_layer"]),
         )
     )
 

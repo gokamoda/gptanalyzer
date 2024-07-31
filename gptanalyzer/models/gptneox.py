@@ -10,9 +10,11 @@ from transformers.models.gpt_neox.modeling_gpt_neox import (GPTNeoXAttention,
                                                             GPTNeoXMLP,
                                                             GPTNeoXModel)
 
-from gptanalyzer.models.hook import ForwardHook
-from gptanalyzer.modules.my_torchtyping import BATCH, HIDDEN_DIM, SEQUENCE
+from gptanalyzer.modules.my_torchtyping import (BATCH, HEAD, HEAD_DIM,
+                                                HIDDEN_DIM, KEY, QUERY,
+                                                SEQUENCE)
 from gptanalyzer.modules.mylogger import init_logging
+from gptanalyzer.nn_utils import ForwardHook, MyLayerNorm
 
 LOG_PATH = "pytest.log" if "pytest" in sys.modules else "latest.log"
 logger = init_logging(__name__, log_path=LOG_PATH)
@@ -68,6 +70,7 @@ class MyGPTNeoXAttention(GPTNeoXAttention):
         self.query = nn.Linear(self.hidden_size, self.hidden_size, bias=True)
         self.key = nn.Linear(self.hidden_size, self.hidden_size, bias=True)
         self.value = nn.Linear(self.hidden_size, self.hidden_size, bias=True)
+        self.for_hook = ForwardHook()
 
     def split_qkv_weight(self):
         """Prepare QKV weights for attention computation."""
@@ -95,6 +98,83 @@ class MyGPTNeoXAttention(GPTNeoXAttention):
         self.value.weight = nn.Parameter(qkvw[2])
         self.value.bias = nn.Parameter(qkvb[2])
 
+        wvh: TensorType[HEAD, HIDDEN_DIM, HEAD_DIM] = (
+            qkvw[2]
+            .view(self.num_attention_heads, self.head_size, self.hidden_size)
+            .transpose(-1, -2)
+        )
+        woh: TensorType[HEAD, HEAD_DIM, HIDDEN_DIM] = self.dense.weight.T.view(
+            self.num_attention_heads, self.head_size, self.hidden_size
+        )
+        self.wvo: TensorType[HEAD, HIDDEN_DIM, HIDDEN_DIM] = wvh @ woh
+        self.bvo: TensorType[HIDDEN_DIM] = (
+            qkvb[2] @ self.dense.weight.T + self.dense.bias
+        )
+
+    def _attn(self, query, key, value, attention_mask=None, head_mask=None):
+        # q, k, v: [bs, num_attention_heads, seq_len, attn_head_size]
+        # compute causal mask from causal mask buffer
+        batch_size, num_attention_heads, query_length, attn_head_size = (
+            query.size()
+        )
+        key_length = key.size(-2)
+
+        # dynamically increase the causal mask with the key length, if needed.
+        if key_length > self.bias.shape[-1]:
+            self._init_bias(key_length, device=key.device)
+        causal_mask = self.bias[
+            :, :, key_length - query_length : key_length, :key_length
+        ]
+
+        query = query.view(
+            batch_size * num_attention_heads, query_length, attn_head_size
+        )
+        key = key.view(
+            batch_size * num_attention_heads, key_length, attn_head_size
+        )
+        attn_scores = torch.zeros(
+            batch_size * num_attention_heads,
+            query_length,
+            key_length,
+            dtype=query.dtype,
+            device=key.device,
+        )
+        attn_scores = torch.baddbmm(
+            attn_scores,
+            query,
+            key.transpose(1, 2),
+            beta=1.0,
+            alpha=self.norm_factor,
+        )
+        attn_scores = attn_scores.view(
+            batch_size, num_attention_heads, query_length, key_length
+        )
+
+        mask_value = torch.finfo(attn_scores.dtype).min
+        # Need to be a tensor, otherwise we get error: `RuntimeError: expected scalar type float but found double`.
+        # Need to be on the same device, otherwise `RuntimeError: ..., x and y to be on the same device`
+        mask_value = torch.tensor(mask_value, dtype=attn_scores.dtype).to(
+            attn_scores.device
+        )
+        attn_scores = torch.where(causal_mask, attn_scores, mask_value)
+
+        if attention_mask is not None:
+            # Apply the attention mask
+            attn_scores = attn_scores + attention_mask
+
+        attn_weights = nn.functional.softmax(attn_scores, dim=-1)
+        attn_weights = attn_weights.to(value.dtype)
+
+        # Mask heads if we want to
+        if head_mask is not None:
+            attn_weights = attn_weights * head_mask
+
+        attn_weights = self.attention_dropout(attn_weights)
+
+        attn_output = torch.matmul(attn_weights, value)
+        # attn_output = torch.einsum("bhij,bhjd->bhijd", attn_weights, value)
+        return attn_output, attn_weights
+
     def forward(
         self,
         hidden_states: TensorType[BATCH, SEQUENCE, HIDDEN_DIM],
@@ -119,10 +199,16 @@ class MyGPTNeoXAttention(GPTNeoXAttention):
         )
 
         # Reshape outputs
-        attn_output = self._merge_heads(
-            attn_output, self.num_attention_heads, self.head_size
+        # attn_output = self._merge_heads(
+        #     attn_output, self.num_attention_heads, self.head_size
+        # )
+        # attn_output = self.dense(attn_output)
+        attn_output: TensorType[BATCH, SEQUENCE, HIDDEN_DIM] = (
+            attn_output  # : TensorType[BATCH, HEAD, QUERY, KEY, HIDDEN_DIM]
+            # .sum(dim=-2)  # sum by key position
+            .permute(0, 2, 1, 3).sum(dim=2)  # sum by head
         )
-        attn_output = self.dense(attn_output)
+        attn_output = attn_output + self.bvo
 
         outputs = (attn_output, present)
         if output_attentions:
@@ -139,13 +225,25 @@ class MyGPTNeoXAttention(GPTNeoXAttention):
     ):
         has_layer_past = layer_past is not None
 
+        # Compute QKV values
         new_shape = hidden_states.size()[:-1] + (
             self.num_attention_heads,
             self.head_size,
         )
-        query = self.query(hidden_states).view(new_shape).permute(0, 2, 1, 3)
-        key = self.key(hidden_states).view(new_shape).permute(0, 2, 1, 3)
-        value = self.value(hidden_states).view(new_shape).permute(0, 2, 1, 3)
+
+        query: TensorType[BATCH, HEAD, SEQUENCE, HEAD_DIM] = (
+            self.query(hidden_states).view(new_shape).permute(0, 2, 1, 3)
+        )
+        key: TensorType[BATCH, HEAD, SEQUENCE, HEAD_DIM] = (
+            self.key(hidden_states).view(new_shape).permute(0, 2, 1, 3)
+        )
+        value: TensorType[BATCH, HEAD, SEQUENCE, HEAD_DIM] = (
+            self.value(hidden_states).view(new_shape).permute(0, 2, 1, 3)
+        )
+
+        # logger.info(hidden_states.shape)
+        # logger.info(self.wvo.shape)
+        value = torch.einsum("bsd,hdi->bhsi", hidden_states, self.wvo)
 
         # Compute rotary embeddings on rotary_ndims
         query_rot = query[..., : self.rotary_ndims]
@@ -166,13 +264,12 @@ class MyGPTNeoXAttention(GPTNeoXAttention):
 
         # Cache QKV values
         if has_layer_past:
-            past_key = layer_past[0]
-            past_value = layer_past[1]
-            key = torch.cat((past_key, key), dim=-2)
-            value = torch.cat((past_value, value), dim=-2)
-        present = (key, value) if use_cache else None
+            raise NotImplementedError()
 
-        return query, key, value, present
+        if use_cache:
+            raise NotImplementedError("use_cache is not implemented yet.")
+
+        return query, key, value, None
 
 
 class MyGPTNeoXMLP(GPTNeoXMLP):
@@ -188,8 +285,67 @@ class MyGPTNeoXLayer(GPTNeoXLayer):
 
     def __init__(self, config):
         super().__init__(config)
+        self.input_layernorm = MyLayerNorm(
+            config.hidden_size, eps=config.layer_norm_eps
+        )
+        self.post_attention_layernorm = MyLayerNorm(
+            config.hidden_size, eps=config.layer_norm_eps
+        )
         self.attention = MyGPTNeoXAttention(config)
         self.mlp = MyGPTNeoXMLP(config)
+        self.for_hook = ForwardHook()
+    
+    def forward(
+        self,
+        hidden_states: Optional[torch.FloatTensor],
+        attention_mask: Optional[torch.FloatTensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        use_cache: Optional[bool] = False,
+        layer_past: Optional[Tuple[torch.Tensor]] = None,
+        output_attentions: Optional[bool] = False,
+    ):
+        residual_input = hidden_states
+        attention_layer_outputs = self.attention(
+            self.input_layernorm(hidden_states),
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            layer_past=layer_past,
+            head_mask=head_mask,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+        )
+        attn_output = attention_layer_outputs[0]  # output_attn: attn_output, present, (attn_weights)
+        attn_output = self.post_attention_dropout(attn_output)
+        outputs = attention_layer_outputs[1:]
+
+        if self.use_parallel_residual:
+            # pseudocode:
+            # x = x + attn(ln1(x)) + mlp(ln2(x))
+            mlp_output = self.mlp(self.post_attention_layernorm(hidden_states))
+            mlp_output = self.post_mlp_dropout(mlp_output)
+            hidden_states = mlp_output + attn_output + hidden_states
+        else:
+            # pseudocode:
+            # x = x + attn(ln1(x))
+            # x = x + mlp(ln2(x))
+            attn_output = attn_output + hidden_states
+            mlp_output = self.mlp(self.post_attention_layernorm(attn_output))
+            mlp_output = self.post_mlp_dropout(mlp_output)
+            hidden_states = mlp_output + attn_output
+
+        self.for_hook(
+            residual_input=residual_input.detach().to("cpu"),
+            attn_output=attn_output.detach().to("cpu"),
+            mlp_output=mlp_output.detach().to("cpu"),
+        )
+
+        if use_cache:
+            outputs = (hidden_states,) + outputs  # hidden_states, present, (attn_weights)
+        else:
+            outputs = (hidden_states,) + outputs[1:]  # hidden_states, (attn_weights)
+
+        return outputs
 
 
 class MyGPTNeoXModel(GPTNeoXModel):
@@ -199,6 +355,9 @@ class MyGPTNeoXModel(GPTNeoXModel):
         super().__init__(config)
         self.layers = nn.ModuleList(
             [MyGPTNeoXLayer(config) for _ in range(config.num_hidden_layers)]
+        )
+        self.final_layer_norm = MyLayerNorm(
+            config.hidden_size, eps=config.layer_norm_eps
         )
         self.post_init()
 

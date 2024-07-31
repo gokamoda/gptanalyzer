@@ -7,7 +7,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from transformers import GPT2Tokenizer
+from transformers import AutoTokenizer, GPT2Tokenizer
 from transformers.tokenization_utils_base import BatchEncoding
 
 from gptanalyzer.analyzers import logit_lens
@@ -108,8 +108,9 @@ def pipeline(prompt: str, model_name_or_path: str, device: str) -> Instance:
     -------
     Instance
     """
-    tokenizer = GPT2Tokenizer.from_pretrained(model_name_or_path)
-    gpt2 = load_model(model_name_or_path).to(device)
+    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+    model, class_field_names = load_model(model_name_or_path)
+    model = model.to(device)
 
     inputs: BatchEncoding = tokenizer(prompt, return_tensors="pt")
     result = Instance(
@@ -120,7 +121,8 @@ def pipeline(prompt: str, model_name_or_path: str, device: str) -> Instance:
         tokenizer.decode(i) for i in result.inputs["input_ids"][0]
     ]
     result.hf_generation = generate(
-        model=gpt2,
+        model=model,
+        class_field_names=class_field_names,
         inputs=inputs,
         pad_token_id=tokenizer.eos_token_id,
         attention_hook=True,
@@ -134,7 +136,8 @@ def pipeline(prompt: str, model_name_or_path: str, device: str) -> Instance:
         result.hf_generation.generated_tokens
     )
     result.logit_through_logit_lens = logit_lens(
-        model=gpt2,
+        model=model,
+        class_field_names=class_field_names,
         hidden_states=result.hf_generation.hidden_states,
     )
 
@@ -229,7 +232,7 @@ if __name__ == "__main__":
     print(
         pipeline(
             "Tokyo is the capital of",
-            "gpt2-medium",
+            "EleutherAI/pythia-14m",
             device=("cuda" if torch.cuda.is_available() else "cpu"),
         ).generated_text
     )
