@@ -284,20 +284,15 @@ def get_observation_hooks_results(
     list[BatchHookResultForLayer]
         _description_
     """
-    logger.info(observation_hooks)
     if "layer" in observation_hooks["0"].keys():
         hook_results = [
             observation_hooks[str(layer_idx)]["layer"].result
             for layer_idx in range(n_layer)
         ]
-        logger.info(hook_results)
     else:
         hook_results = [BatchHookResultForLayer() for _ in range(n_layer)]
 
     for layer_idx in range(n_layer):
-        logger.info(layer_idx)
-        logger.info(observation_hooks[str(layer_idx)])
-        logger.info(hook_results[layer_idx])
         if "attn" in observation_hooks[str(layer_idx)].keys():
             hook_results[layer_idx].attn = observation_hooks[str(layer_idx)][
                 "attn"

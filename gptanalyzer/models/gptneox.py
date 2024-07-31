@@ -171,8 +171,8 @@ class MyGPTNeoXAttention(GPTNeoXAttention):
 
         attn_weights = self.attention_dropout(attn_weights)
 
-        attn_output = torch.matmul(attn_weights, value)
-        # attn_output = torch.einsum("bhij,bhjd->bhijd", attn_weights, value)
+        # attn_output = torch.matmul(attn_weights, value)
+        attn_output = torch.einsum("bhij,bhjd->bhijd", attn_weights, value)
         return attn_output, attn_weights
 
     def forward(
@@ -203,9 +203,9 @@ class MyGPTNeoXAttention(GPTNeoXAttention):
         #     attn_output, self.num_attention_heads, self.head_size
         # )
         # attn_output = self.dense(attn_output)
-        attn_output: TensorType[BATCH, SEQUENCE, HIDDEN_DIM] = (
+        attn_output: TensorType[BATCH, SEQUENCE, SEQUENCE, HIDDEN_DIM] = (
             attn_output  # : TensorType[BATCH, HEAD, QUERY, KEY, HIDDEN_DIM]
-            # .sum(dim=-2)  # sum by key position
+            .sum(dim=-2)  # sum by key position
             .permute(0, 2, 1, 3).sum(dim=2)  # sum by head
         )
         attn_output = attn_output + self.bvo
@@ -278,6 +278,17 @@ class MyGPTNeoXMLP(GPTNeoXMLP):
     def __init__(self, config):
         super().__init__(config)
         self.for_hook = ForwardHook()
+
+    def forward(self, hidden_states):
+        hidden_states = self.dense_h_to_4h(hidden_states)
+        hidden_states = self.act(hidden_states)
+        self.for_hook(
+            activation=hidden_states.detach().to("cpu")
+        )
+        hidden_states = self.dense_4h_to_h(hidden_states)
+        return hidden_states
+
+    
 
 
 class MyGPTNeoXLayer(GPTNeoXLayer):

@@ -31,7 +31,8 @@ def test_generate():
     tokenizer = GPT2Tokenizer.from_pretrained(model_name_or_path)
     inputs: BatchEncoding = tokenizer(prompt, return_tensors="pt")
 
-    model = load_model(model_name_or_path).to(device)
+    model, class_field_names = load_model(model_name_or_path)
+    model = model.to(device)
 
     result = Instance(
         prompt=prompt,
@@ -42,6 +43,7 @@ def test_generate():
 
     result.hf_generation = generate(
         model=model,
+        class_field_names=class_field_names,
         inputs=inputs,
         pad_token_id=tokenizer.eos_token_id,
         attention_hook=True,
@@ -52,6 +54,7 @@ def test_generate():
     assert torch.allclose(
         logit_lens(
             model=model,
+        class_field_names=class_field_names,
             hidden_states=result.hf_generation.hidden_states[0],
         )[-1][-1],
         call_logits[-1][-1],
@@ -67,7 +70,8 @@ def test_observation_hooks():
     tokenizer = GPT2Tokenizer.from_pretrained(model_name_or_path)
     inputs: BatchEncoding = tokenizer(prompt, return_tensors="pt")
 
-    model = load_model(model_name_or_path).to(device)
+    model, class_field_names = load_model(model_name_or_path)
+    model = model.to(device)
 
     result = Instance(
         prompt=prompt,
@@ -76,6 +80,7 @@ def test_observation_hooks():
 
     result.hf_generation = generate(
         model=model,
+        class_field_names=class_field_names,
         inputs=inputs,
         pad_token_id=tokenizer.eos_token_id,
         attention_hook=True,
@@ -111,13 +116,15 @@ def test_attn_token_ablation():
     tokenizer = GPT2Tokenizer.from_pretrained(model_name_or_path)
     inputs: BatchEncoding = tokenizer(prompt, return_tensors="pt")
 
-    model = load_model(model_name_or_path).to(device)
+    model, class_field_names = load_model(model_name_or_path)
+    model = model.to(device)
 
     attn_token_ablation = {0: [(0, 1, 3, 1)], 1: [(0, 1, 4, 2)]}
     attn_token_ablation_neg = {0: [(0, 1, 3, 0)], 1: [(0, 1, 4, 1)]}
 
     result = generate(
         model=model,
+        class_field_names=class_field_names,
         inputs=inputs,
         pad_token_id=tokenizer.eos_token_id,
         attention_hook=True,
@@ -152,13 +159,15 @@ def test_attn_dim_ablation():
     tokenizer = GPT2Tokenizer.from_pretrained(model_name_or_path)
     inputs: BatchEncoding = tokenizer(prompt, return_tensors="pt")
 
-    model = load_model(model_name_or_path).to(device)
+    model, class_field_names = load_model(model_name_or_path)
+    model = model.to(device)
 
     attn_dim_ablation = {0: [(0, 1, 3)], 1: [(0, 1, 4)]}
     attn_dim_ablation_neg = {0: [(0, 1, 4)], 1: [(1, 1, 4)]}
 
     result = generate(
         model=model,
+        class_field_names=class_field_names,
         inputs=inputs,
         pad_token_id=tokenizer.eos_token_id,
         attention_hook=True,
@@ -192,13 +201,15 @@ def test_mlp_dim_ablation():
     tokenizer = GPT2Tokenizer.from_pretrained(model_name_or_path)
     inputs: BatchEncoding = tokenizer(prompt, return_tensors="pt")
 
-    model = load_model(model_name_or_path).to(device)
+    model, class_field_names = load_model(model_name_or_path)
+    model = model.to(device)
 
     mlp_dim_ablation = {0: [(0, 1)], 1: [(0, 3)]}
     mlp_dim_ablation_neg = {0: [(0, 2)], 1: [(1, 3)]}
 
     result = generate(
         model=model,
+        class_field_names=class_field_names,
         inputs=inputs,
         pad_token_id=tokenizer.eos_token_id,
         layer_hook=True,
@@ -232,10 +243,12 @@ def test_ln_fix():
     tokenizer = GPT2Tokenizer.from_pretrained(model_name_or_path)
     inputs: BatchEncoding = tokenizer(prompts, return_tensors="pt")
 
-    model = load_model(model_name_or_path).to(device)
+    model, class_field_names = load_model(model_name_or_path)
+    model = model.to(device)
 
     original = generate(
         model=model,
+        class_field_names=class_field_names,
         inputs=inputs,
         pad_token_id=tokenizer.eos_token_id,
         ln_hook=True,
@@ -246,6 +259,7 @@ def test_ln_fix():
 
     ln_fix_result = generate(
         model=model,
+        class_field_names=class_field_names,
         inputs=inputs,
         pad_token_id=tokenizer.eos_token_id,
         ln_hook=True,
@@ -275,10 +289,12 @@ def test_attn_fix():
     tokenizer = GPT2Tokenizer.from_pretrained(model_name_or_path)
     inputs: BatchEncoding = tokenizer(prompts, return_tensors="pt")
 
-    model = load_model(model_name_or_path).to(device)
+    model, class_field_names = load_model(model_name_or_path)
+    model = model.to(device)
 
     original = generate(
         model=model,
+        class_field_names=class_field_names,
         inputs=inputs,
         pad_token_id=tokenizer.eos_token_id,
         attention_hook=True,
@@ -289,6 +305,7 @@ def test_attn_fix():
 
     attn_fix_result = generate(
         model=model,
+        class_field_names=class_field_names,
         inputs=inputs,
         pad_token_id=tokenizer.eos_token_id,
         attention_hook=True,
