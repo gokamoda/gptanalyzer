@@ -225,7 +225,6 @@ def generate(
         if observation_hooks is None
         else get_observation_hooks_results(
             observation_hooks=observation_hooks,
-            class_field_names=class_field_names,
             n_layer=getattr(model.config, class_field_names["n_layer"]),
         )
     )
@@ -239,8 +238,16 @@ def generate(
         )
 
     return BatchHuggingfaceGenerationPlus(
-        hidden_states=torch.stack(output.hidden_states[0], dim=1).to("cpu") if output_hidden_states else None,
-        attentions=torch.stack(output.attentions[0], dim=1).to("cpu") if output_attentions else None,
+        hidden_states=(
+            torch.stack(output.hidden_states[0], dim=1).to("cpu")
+            if output_hidden_states
+            else None
+        ),
+        attentions=(
+            torch.stack(output.attentions[0], dim=1).to("cpu")
+            if output_attentions
+            else None
+        ),
         logits=output.logits[0].to("cpu") if output_logits else None,
         generated_tokens=output.sequences.to("cpu"),
         hook_results=observation_hook_results,

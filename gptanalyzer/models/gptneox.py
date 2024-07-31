@@ -11,8 +11,7 @@ from transformers.models.gpt_neox.modeling_gpt_neox import (GPTNeoXAttention,
                                                             GPTNeoXModel)
 
 from gptanalyzer.modules.my_torchtyping import (BATCH, HEAD, HEAD_DIM,
-                                                HIDDEN_DIM, KEY, QUERY,
-                                                SEQUENCE)
+                                                HIDDEN_DIM, SEQUENCE)
 from gptanalyzer.modules.mylogger import init_logging
 from gptanalyzer.nn_utils import ForwardHook, MyLayerNorm
 
@@ -65,11 +64,13 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids, unsqueeze_dim=1):
 class MyGPTNeoXAttention(GPTNeoXAttention):
     """Custom attention layer for GPTNeoX."""
 
+    wvo = None
+    bvo = None
+
     def __init__(self, config):
         super().__init__(config)
         self.query = nn.Linear(self.hidden_size, self.hidden_size, bias=True)
         self.key = nn.Linear(self.hidden_size, self.hidden_size, bias=True)
-        self.value = nn.Linear(self.hidden_size, self.hidden_size, bias=True)
         self.for_hook = ForwardHook()
 
     def split_qkv_weight(self):
@@ -151,8 +152,10 @@ class MyGPTNeoXAttention(GPTNeoXAttention):
         )
 
         mask_value = torch.finfo(attn_scores.dtype).min
-        # Need to be a tensor, otherwise we get error: `RuntimeError: expected scalar type float but found double`.
-        # Need to be on the same device, otherwise `RuntimeError: ..., x and y to be on the same device`
+        # Need to be a tensor, otherwise we get error:
+        # `RuntimeError: expected scalar type float but found double`.
+        # Need to be on the same device, otherwise
+        # `RuntimeError: ..., x and y to be on the same device`
         mask_value = torch.tensor(mask_value, dtype=attn_scores.dtype).to(
             attn_scores.device
         )
@@ -206,10 +209,12 @@ class MyGPTNeoXAttention(GPTNeoXAttention):
         self.for_hook(
             attn_weights=attn_weights.detach().to("cpu"),
         )
-        attn_output: TensorType[BATCH, SEQUENCE, SEQUENCE, HIDDEN_DIM] = (
-            attn_output  # : TensorType[BATCH, HEAD, QUERY, KEY, HIDDEN_DIM]
-            .sum(dim=-2)  # sum by key position
-            .permute(0, 2, 1, 3).sum(dim=2)  # sum by head
+        attn_output: TensorType[
+            BATCH, HEAD, SEQUENCE, SEQUENCE, HIDDEN_DIM
+        ] = (
+            attn_output.sum(dim=-2)  # sum by key position
+            .permute(0, 2, 1, 3)
+            .sum(dim=2)  # sum by head
         )
 
         attn_output = attn_output + self.bvo
@@ -241,7 +246,9 @@ class MyGPTNeoXAttention(GPTNeoXAttention):
         key: TensorType[BATCH, HEAD, SEQUENCE, HEAD_DIM] = (
             self.key(hidden_states).view(new_shape).permute(0, 2, 1, 3)
         )
-        value: TensorType[BATCH, HEAD, SEQUENCE, HIDDEN_DIM] = torch.einsum("bsd,hdi->bhsi", hidden_states, self.wvo)
+        value: TensorType[BATCH, HEAD, SEQUENCE, HIDDEN_DIM] = torch.einsum(
+            "bsd,hdi->bhsi", hidden_states, self.wvo
+        )
 
         # Compute rotary embeddings on rotary_ndims
         query_rot = query[..., : self.rotary_ndims]
@@ -280,13 +287,9 @@ class MyGPTNeoXMLP(GPTNeoXMLP):
     def forward(self, hidden_states):
         hidden_states = self.dense_h_to_4h(hidden_states)
         hidden_states = self.act(hidden_states)
-        self.for_hook(
-            activation=hidden_states.detach().to("cpu")
-        )
+        self.for_hook(activation=hidden_states.detach().to("cpu"))
         hidden_states = self.dense_4h_to_h(hidden_states)
         return hidden_states
-
-    
 
 
 class MyGPTNeoXLayer(GPTNeoXLayer):
@@ -303,7 +306,7 @@ class MyGPTNeoXLayer(GPTNeoXLayer):
         self.attention = MyGPTNeoXAttention(config)
         self.mlp = MyGPTNeoXMLP(config)
         self.for_hook = ForwardHook()
-    
+
     def forward(
         self,
         hidden_states: Optional[torch.FloatTensor],
@@ -324,7 +327,9 @@ class MyGPTNeoXLayer(GPTNeoXLayer):
             use_cache=use_cache,
             output_attentions=output_attentions,
         )
-        attn_output = attention_layer_outputs[0]  # output_attn: attn_output, present, (attn_weights)
+        attn_output = attention_layer_outputs[
+            0
+        ]  # output_attn: attn_output, present, (attn_weights)
         attn_output = self.post_attention_dropout(attn_output)
         outputs = attention_layer_outputs[1:]
 
@@ -338,14 +343,16 @@ class MyGPTNeoXLayer(GPTNeoXLayer):
                 residual_input=residual_input.detach().to("cpu"),
                 attn_output=attn_output.detach().to("cpu"),
                 mlp_output=mlp_output.detach().to("cpu"),
-                residual_output=hidden_states.detach().to("cpu")
+                residual_output=hidden_states.detach().to("cpu"),
             )
         else:
             # pseudocode:
             # x = x + attn(ln1(x))
             # x = x + mlp(ln2(x))
             intermediate_residual = attn_output + hidden_states
-            mlp_output = self.mlp(self.post_attention_layernorm(intermediate_residual))
+            mlp_output = self.mlp(
+                self.post_attention_layernorm(intermediate_residual)
+            )
             mlp_output = self.post_mlp_dropout(mlp_output)
             hidden_states = mlp_output + attn_output
             self.for_hook(
@@ -353,14 +360,17 @@ class MyGPTNeoXLayer(GPTNeoXLayer):
                 attn_output=attn_output.detach().to("cpu"),
                 intermediate_residual=intermediate_residual.detach().to("cpu"),
                 mlp_output=mlp_output.detach().to("cpu"),
-                residual_output=hidden_states.detach().to("cpu")
+                residual_output=hidden_states.detach().to("cpu"),
             )
 
-
         if use_cache:
-            outputs = (hidden_states,) + outputs  # hidden_states, present, (attn_weights)
+            outputs = (
+                hidden_states,
+            ) + outputs  # hidden_states, present, (attn_weights)
         else:
-            outputs = (hidden_states,) + outputs[1:]  # hidden_states, (attn_weights)
+            outputs = (hidden_states,) + outputs[
+                1:
+            ]  # hidden_states, (attn_weights)
 
         return outputs
 

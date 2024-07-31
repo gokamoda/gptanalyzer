@@ -5,9 +5,9 @@ from torchtyping import TensorType
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
 
 from gptanalyzer.models import MyGPT2LMHeadModel, MyGPTNeoXForCausalLM
+from gptanalyzer.modules import init_logging
 from gptanalyzer.modules.my_torchtyping import (HIDDEN_DIM, LAYER_PLUS_1,
                                                 SEQUENCE, VOCAB)
-from gptanalyzer.modules import init_logging
 
 LOG_PATH = "pytest.log" if "pytest" in sys.modules else "latest.log"
 logger = init_logging(__name__, log_path=LOG_PATH, clear=True)
@@ -29,7 +29,10 @@ def _logit_lens_redefined_gpt2(
     hidden_states = hidden_states.to(device)
     logits_by_layer = []
 
-    layer_norm = getattr(getattr(model, class_field_names["model_class_name"]), class_field_names["ln_f"])
+    layer_norm = getattr(
+        getattr(model, class_field_names["model_class_name"]),
+        class_field_names["ln_f"],
+    )
     if no_bias:
         lm_head.bias = torch.nn.Parameter(torch.zeros(lm_head.bias.shape))
     with torch.no_grad():
@@ -68,8 +71,6 @@ def logit_lens(
     -------
     TensorType[LAYERS_PLUS_1, SEQUENCE, VOCAB]
     """
-
-
 
     if isinstance(model, (MyGPT2LMHeadModel, MyGPTNeoXForCausalLM)):
         return _logit_lens_redefined_gpt2(

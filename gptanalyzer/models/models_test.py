@@ -44,7 +44,7 @@ def test_gpt2_model():
     original = call(model, inputs)
 
     # REDEFINED
-    model, class_field_names = load_model(model_name_or_path)
+    model, _ = load_model(model_name_or_path)
     model = model.to(device)
     redefined = call(model, inputs)
 
@@ -67,7 +67,7 @@ def test_gptneox_model():
     original = call(model, inputs)
 
     # REDEFINED
-    model, class_field_names = load_model(model_name_or_path)
+    model, _ = load_model(model_name_or_path)
     model = model.to(device)
     redefined = call(model, inputs)
 

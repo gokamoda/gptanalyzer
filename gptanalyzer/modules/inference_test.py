@@ -48,14 +48,14 @@ def test_generate():
         pad_token_id=tokenizer.eos_token_id,
         attention_hook=True,
         layer_hook=True,
-        output_hidden_states=True
+        output_hidden_states=True,
     )
 
     # check if model.generate() returns the same info as model.__call__
     assert torch.allclose(
         logit_lens(
             model=model,
-        class_field_names=class_field_names,
+            class_field_names=class_field_names,
             hidden_states=result.hf_generation.hidden_states[0],
         )[-1][-1],
         call_logits[-1][-1],
@@ -88,7 +88,7 @@ def test_observation_hooks():
         mlp_hook=True,
         layer_hook=True,
         ln_hook=True,
-        output_hidden_states=True
+        output_hidden_states=True,
     )
 
     assert isinstance(result.hf_generation.hidden_states, torch.Tensor)

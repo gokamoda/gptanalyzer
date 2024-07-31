@@ -1,3 +1,4 @@
+import sys
 from typing import Literal
 
 from torch import nn
@@ -6,18 +7,15 @@ from torchtyping import TensorType
 
 from gptanalyzer.models.gpt2 import MyGPT2LMHeadModel
 from gptanalyzer.models.gptneox import MyGPTNeoXForCausalLM
+from gptanalyzer.modules.mylogger import init_logging
 
 from .my_dataclasses import (BatchHookResultForAttention,
                              BatchHookResultForLayer, BatchHookResultForLN,
                              BatchHookResultForMLP, BatchHookResultForModel)
 from .my_torchtyping import BATCH, HEAD, KEY, QUERY
 
-from gptanalyzer.modules.mylogger import init_logging
-import sys
-
 LOG_PATH = "pytest.log" if "pytest" in sys.modules else "latest.log"
 logger = init_logging(__name__, log_path=LOG_PATH)
-
 
 
 class Hook:
@@ -263,7 +261,6 @@ def set_observation_hooks(
 
 def get_observation_hooks_results(
     observation_hooks: dict[str, dict[str, Hook]],
-    class_field_names: dict[str, str],
     n_layer: int,
 ) -> BatchHookResultForModel:
     """_summary_

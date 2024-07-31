@@ -589,7 +589,9 @@ class BatchHuggingfaceGenerationPlus:
         batch_size = self.generated_tokens.shape[0]
         return [
             HuggingfaceGenerationPlus(
-                hidden_states=self.hidden_states[idx] if self.hidden_states else None,
+                hidden_states=(
+                    self.hidden_states[idx] if self.hidden_states else None
+                ),
                 attentions=self.attentions[idx] if self.attentions else None,
                 logits=self.logits[idx] if self.logits else None,
                 hook_results=self.hook_results.unbatch(idx),

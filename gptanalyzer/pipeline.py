@@ -169,7 +169,8 @@ def batch_dim_importance(
 
     tokenizer = GPT2Tokenizer.from_pretrained(model_name_or_path)
     tokenizer.pad_token = tokenizer.eos_token
-    model = load_model(model_name_or_path).to(device)
+    model, _ = load_model(model_name_or_path)
+    model = model.to(device)
 
     n_layer = model.config.n_layer
     n_embd = model.config.n_embd

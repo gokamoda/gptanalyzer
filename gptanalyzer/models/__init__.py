@@ -54,8 +54,7 @@ def load_model(
                 "post_attention_layernorm",
             ],
             "ln_f": "final_layer_norm",
-            "lm_head": "embed_out"
-
+            "lm_head": "embed_out",
         }
         return load_gptneox_model(model_name_or_path), class_field_names
 
