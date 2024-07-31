@@ -586,12 +586,12 @@ class BatchHuggingfaceGenerationPlus:
 
     def unbatch(self) -> list[HuggingfaceGenerationPlus]:
         """Unbatch the batched tensors."""
-        batch_size = self.logits.shape[0]
+        batch_size = self.generated_tokens.shape[0]
         return [
             HuggingfaceGenerationPlus(
-                hidden_states=self.hidden_states[idx],
-                attentions=self.attentions[idx],
-                logits=self.logits[idx],
+                hidden_states=self.hidden_states[idx] if self.hidden_states else None,
+                attentions=self.attentions[idx] if self.attentions else None,
+                logits=self.logits[idx] if self.logits else None,
                 hook_results=self.hook_results.unbatch(idx),
                 generated_tokens=self.generated_tokens[idx],
             )

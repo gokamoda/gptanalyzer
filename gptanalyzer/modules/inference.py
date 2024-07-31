@@ -96,6 +96,9 @@ def generate(
     class_field_names: dict[str, str],
     inputs: BatchEncoding,
     pad_token_id: int,
+    output_attentions: bool = False,
+    output_logits: bool = False,
+    output_hidden_states: bool = False,
     attention_hook: bool = False,
     mlp_hook: bool = False,
     ln_hook: bool = False,
@@ -212,9 +215,9 @@ def generate(
             do_sample=False,
             use_cache=False,
             return_dict_in_generate=True,
-            output_hidden_states=True,
-            output_attentions=True,
-            output_logits=True,
+            output_hidden_states=output_hidden_states,
+            output_attentions=output_attentions,
+            output_logits=output_logits,
         )
 
     observation_hook_results = (
@@ -236,9 +239,9 @@ def generate(
         )
 
     return BatchHuggingfaceGenerationPlus(
-        hidden_states=torch.stack(output.hidden_states[0], dim=1).to("cpu"),
-        attentions=torch.stack(output.attentions[0], dim=1).to("cpu"),
-        logits=output.logits[0].to("cpu"),
+        hidden_states=torch.stack(output.hidden_states[0], dim=1).to("cpu") if output_hidden_states else None,
+        attentions=torch.stack(output.attentions[0], dim=1).to("cpu") if output_attentions else None,
+        logits=output.logits[0].to("cpu") if output_logits else None,
         generated_tokens=output.sequences.to("cpu"),
         hook_results=observation_hook_results,
     )

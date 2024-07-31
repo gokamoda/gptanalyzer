@@ -95,8 +95,8 @@ class MyGPTNeoXAttention(GPTNeoXAttention):
         self.key.weight = nn.Parameter(qkvw[1])
         self.key.bias = nn.Parameter(qkvb[1])
 
-        self.value.weight = nn.Parameter(qkvw[2])
-        self.value.bias = nn.Parameter(qkvb[2])
+        # self.value.weight = nn.Parameter(qkvw[2])
+        # self.value.bias = nn.Parameter(qkvb[2])
 
         wvh: TensorType[HEAD, HIDDEN_DIM, HEAD_DIM] = (
             qkvw[2]
@@ -203,11 +203,15 @@ class MyGPTNeoXAttention(GPTNeoXAttention):
         #     attn_output, self.num_attention_heads, self.head_size
         # )
         # attn_output = self.dense(attn_output)
+        self.for_hook(
+            attn_weights=attn_weights.detach().to("cpu"),
+        )
         attn_output: TensorType[BATCH, SEQUENCE, SEQUENCE, HIDDEN_DIM] = (
             attn_output  # : TensorType[BATCH, HEAD, QUERY, KEY, HIDDEN_DIM]
             .sum(dim=-2)  # sum by key position
             .permute(0, 2, 1, 3).sum(dim=2)  # sum by head
         )
+
         attn_output = attn_output + self.bvo
 
         outputs = (attn_output, present)
@@ -237,13 +241,7 @@ class MyGPTNeoXAttention(GPTNeoXAttention):
         key: TensorType[BATCH, HEAD, SEQUENCE, HEAD_DIM] = (
             self.key(hidden_states).view(new_shape).permute(0, 2, 1, 3)
         )
-        value: TensorType[BATCH, HEAD, SEQUENCE, HEAD_DIM] = (
-            self.value(hidden_states).view(new_shape).permute(0, 2, 1, 3)
-        )
-
-        # logger.info(hidden_states.shape)
-        # logger.info(self.wvo.shape)
-        value = torch.einsum("bsd,hdi->bhsi", hidden_states, self.wvo)
+        value: TensorType[BATCH, HEAD, SEQUENCE, HIDDEN_DIM] = torch.einsum("bsd,hdi->bhsi", hidden_states, self.wvo)
 
         # Compute rotary embeddings on rotary_ndims
         query_rot = query[..., : self.rotary_ndims]
@@ -336,20 +334,28 @@ class MyGPTNeoXLayer(GPTNeoXLayer):
             mlp_output = self.mlp(self.post_attention_layernorm(hidden_states))
             mlp_output = self.post_mlp_dropout(mlp_output)
             hidden_states = mlp_output + attn_output + hidden_states
+            self.for_hook(
+                residual_input=residual_input.detach().to("cpu"),
+                attn_output=attn_output.detach().to("cpu"),
+                mlp_output=mlp_output.detach().to("cpu"),
+                residual_output=hidden_states.detach().to("cpu")
+            )
         else:
             # pseudocode:
             # x = x + attn(ln1(x))
             # x = x + mlp(ln2(x))
-            attn_output = attn_output + hidden_states
-            mlp_output = self.mlp(self.post_attention_layernorm(attn_output))
+            intermediate_residual = attn_output + hidden_states
+            mlp_output = self.mlp(self.post_attention_layernorm(intermediate_residual))
             mlp_output = self.post_mlp_dropout(mlp_output)
             hidden_states = mlp_output + attn_output
+            self.for_hook(
+                residual_input=residual_input.detach().to("cpu"),
+                attn_output=attn_output.detach().to("cpu"),
+                intermediate_residual=intermediate_residual.detach().to("cpu"),
+                mlp_output=mlp_output.detach().to("cpu"),
+                residual_output=hidden_states.detach().to("cpu")
+            )
 
-        self.for_hook(
-            residual_input=residual_input.detach().to("cpu"),
-            attn_output=attn_output.detach().to("cpu"),
-            mlp_output=mlp_output.detach().to("cpu"),
-        )
 
         if use_cache:
             outputs = (hidden_states,) + outputs  # hidden_states, present, (attn_weights)
