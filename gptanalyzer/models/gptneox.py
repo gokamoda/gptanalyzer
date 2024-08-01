@@ -73,6 +73,22 @@ class MyGPTNeoXAttention(GPTNeoXAttention):
         self.key = nn.Linear(self.hidden_size, self.hidden_size, bias=True)
         self.for_hook = ForwardHook()
 
+    def collapse_ln(self, ln_weight, ln_bias):
+        """Collapse weights and biases of ln_f."""
+        centering = (
+            torch.diag(torch.ones(ln_weight.shape[0])) - 1 / ln_weight.shape[0]
+        )
+        centering = centering.to(ln_weight.device)
+
+        self.query_key_value.bias = nn.Parameter(
+            ln_bias @ self.query_key_value.weight.T + self.query_key_value.bias
+        )
+
+        self.query_key_value.weight = nn.Parameter(
+            (centering @ torch.diag(ln_weight) @ self.query_key_value.weight.T).T
+        )
+
+
     def split_qkv_weight(self):
         """Prepare QKV weights for attention computation."""
         qkvw = (
@@ -284,6 +300,20 @@ class MyGPTNeoXMLP(GPTNeoXMLP):
         super().__init__(config)
         self.for_hook = ForwardHook()
 
+    def collapse_ln(self, ln_weight, ln_bias):
+        """Collapse weights and biases of ln_f."""
+        centering = (
+            torch.diag(torch.ones(ln_weight.shape[0])) - 1 / ln_weight.shape[0]
+        )
+        centering = centering.to(ln_weight.device)
+
+        self.dense_h_to_4h.bias = nn.Parameter(
+            ln_bias @ self.dense_h_to_4h.weight.T + self.dense_h_to_4h.bias
+        )
+        self.dense_h_to_4h.weight = nn.Parameter(
+            (centering @ torch.diag(ln_weight) @ self.dense_h_to_4h.weight.T).T
+        )
+
     def forward(self, hidden_states):
         hidden_states = self.dense_h_to_4h(hidden_states)
         hidden_states = self.act(hidden_states)
@@ -298,10 +328,10 @@ class MyGPTNeoXLayer(GPTNeoXLayer):
     def __init__(self, config):
         super().__init__(config)
         self.input_layernorm = MyLayerNorm(
-            config.hidden_size, eps=config.layer_norm_eps
+            config.hidden_size, eps=config.layer_norm_eps, collapsed=True
         )
         self.post_attention_layernorm = MyLayerNorm(
-            config.hidden_size, eps=config.layer_norm_eps
+            config.hidden_size, eps=config.layer_norm_eps, collapsed=True
         )
         self.attention = MyGPTNeoXAttention(config)
         self.mlp = MyGPTNeoXMLP(config)
@@ -384,7 +414,7 @@ class MyGPTNeoXModel(GPTNeoXModel):
             [MyGPTNeoXLayer(config) for _ in range(config.num_hidden_layers)]
         )
         self.final_layer_norm = MyLayerNorm(
-            config.hidden_size, eps=config.layer_norm_eps
+            config.hidden_size, eps=config.layer_norm_eps, collapsed=True
         )
         self.post_init()
 
@@ -395,26 +425,46 @@ class MyGPTNeoXForCausalLM(GPTNeoXForCausalLM):
     def __init__(self, config):
         super().__init__(config)
         self.gpt_neox = MyGPTNeoXModel(config)
+        self.embed_out = nn.Linear(config.hidden_size, config.vocab_size, bias=True)
+
+    def collapse_ln(
+        self,
+        ln_weight: TensorType[HIDDEN_DIM],
+        ln_bias: TensorType[HIDDEN_DIM],
+    ):
+        """Collapse weights and biases of ln_f
+        """
+        centering = (
+            torch.diag(torch.ones(ln_weight.shape[0])) - 1 / ln_weight.shape[0]
+        )
+        centering = centering.to(ln_weight.device)
+
+        with torch.no_grad():
+            self.embed_out.bias = nn.Parameter(ln_bias @ self.embed_out.weight.T)
+            self.embed_out.weight = nn.Parameter(
+                (centering @ torch.diag(ln_weight) @ self.embed_out.weight.T).T
+            )
+
+
 
 
 def load_model(model_name_or_path):
     """Load equivalent model for analysis."""
     model = MyGPTNeoXForCausalLM.from_pretrained(model_name_or_path)
     for i in range(model.config.num_hidden_layers):
+        model.gpt_neox.layers[i].attention.collapse_ln(
+            ln_weight=model.gpt_neox.layers[i].input_layernorm.weight,
+            ln_bias=model.gpt_neox.layers[i].input_layernorm.bias,
+        )
+        model.gpt_neox.layers[i].mlp.collapse_ln(
+            ln_weight=model.gpt_neox.layers[i].post_attention_layernorm.weight,
+            ln_bias=model.gpt_neox.layers[i].post_attention_layernorm.bias,
+        )
         model.gpt_neox.layers[i].attention.split_qkv_weight()
-    # for i in range(model.config.n_layer):
-    #     model.transformer.h[i].attn.collapse_ln(
-    #         ln_weight=model.transformer.h[i].ln_1.weight,
-    #         ln_bias=model.transformer.h[i].ln_1.bias,
-    #     )
-    #     model.transformer.h[i].mlp.collapse_ln(
-    #         ln_weight=model.transformer.h[i].ln_2.weight,
-    #         ln_bias=model.transformer.h[i].ln_2.bias,
-    #     )
-    #     model.transformer.h[i].attn.compute_wvo()
-    #     model.transformer.h[i].attn.compute_wqk()
-    # model.collapse_ln(
-    #     model.transformer.ln_f.weight, model.transformer.ln_f.bias
-    # )
+        # model.transformer.h[i].attn.compute_wvo()
+        # model.transformer.h[i].attn.compute_wqk()
+    model.collapse_ln(
+        model.gpt_neox.final_layer_norm.weight, model.gpt_neox.final_layer_norm.bias
+    )
     # logger.info("lm_head bias is True to collapse from ln_f.")
     return model

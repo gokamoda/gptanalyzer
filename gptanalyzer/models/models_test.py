@@ -57,7 +57,7 @@ def test_gptneox_model():
     """Check if redefined model has the same output as the original model."""
 
     prompt = "Tokyo is the capital of"
-    model_name_or_path = "EleutherAI/pythia-14m"
+    model_name_or_path = "EleutherAI/pythia-160m"
 
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     inputs: BatchEncoding = tokenizer(prompt, return_tensors="pt")
@@ -79,4 +79,4 @@ def test_gptneox_model():
     # rtol default was 1e-5
     # this error is predicted to be the cause of joining attention.value and
     # attention.dense linear transformations.
-    assert torch.allclose(original.logits, redefined.logits[0], rtol=2e-5)
+    assert torch.allclose(original.logits, redefined.logits[0])
