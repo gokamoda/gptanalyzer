@@ -33,6 +33,11 @@ class HookResultForAttention:
             if self.weighted_value is not None
             else ""
         )
+        msg += (
+            f"\tattn_scores: {self.attn_scores.shape}\n"
+            if self.attn_scores is not None
+            else ""
+        )
         msg += f"\tkey: {self.key.shape}\n" if self.key is not None else ""
         msg += (
             f"\tquery: {self.query.shape}\n" if self.query is not None else ""
@@ -64,6 +69,11 @@ class BatchHookResultForAttention:
         msg += (
             f"\tweighted_value: {self.weighted_value.shape}\n"
             if self.weighted_value is not None
+            else ""
+        )
+        msg += (
+            f"\tattn_scores: {self.attn_scores.shape}\n"
+            if self.attn_scores is not None
             else ""
         )
         msg += f"\tkey: {self.key.shape}\n" if self.key is not None else ""
