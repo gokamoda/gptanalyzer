@@ -429,15 +429,27 @@ class MyGPT2LMHeadModel(GPT2LMHeadModel):
         centering = centering.to(ln_weight.device)
 
         with torch.no_grad():
+            if ln_bias.device != self.lm_head.weight.device:
+                ln_bias = ln_bias.to(self.lm_head.weight.device)
             self.lm_head.bias = nn.Parameter(ln_bias @ self.lm_head.weight.T)
+
+            if ln_weight.device != self.lm_head.weight.device:
+                ln_weight = ln_weight.to(self.lm_head.weight.device)
+            if centering.device != self.lm_head.weight.device:
+                centering = centering.to(self.lm_head.weight.device)
             self.lm_head.weight = nn.Parameter(
                 (centering @ torch.diag(ln_weight) @ self.lm_head.weight.T).T
             )
 
 
-def load_model(model_name_or_path):
+def load_model(model_name_or_path, device_map: dict|str|None = None):
     """Load equivalent model for analysis."""
-    model = MyGPT2LMHeadModel.from_pretrained(model_name_or_path)
+    if device_map:
+        print("multi GPU")
+        model = MyGPT2LMHeadModel.from_pretrained(model_name_or_path, device_map=device_map)
+        print(model.hf_device_map)
+    else:
+        model = MyGPT2LMHeadModel.from_pretrained(model_name_or_path)
     for i in range(model.config.n_layer):
         model.transformer.h[i].attn.collapse_ln(
             ln_weight=model.transformer.h[i].ln_1.weight,

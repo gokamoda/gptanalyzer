@@ -16,6 +16,8 @@ from gptanalyzer.modules import (HookResultForModel, Instance,
                                  attn_weight_repeat, generate, init_logging,
                                  ln_data_repeat)
 
+from IPython import embed
+
 LOG_PATH = "pytest.log" if "pytest" in sys.modules else "latest.log"
 logger = init_logging(__name__, log_path=LOG_PATH, clear=True)
 
@@ -109,8 +111,8 @@ def pipeline(prompt: str, model_name_or_path: str, device: str) -> Instance:
     Instance
     """
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
-    model, class_field_names = load_model(model_name_or_path)
-    model = model.to(device)
+    model, class_field_names = load_model(model_name_or_path, device_map_auto=True)
+    # model = model.to(device)
 
     inputs: BatchEncoding = tokenizer(prompt, return_tensors="pt")
     result = Instance(
@@ -135,11 +137,11 @@ def pipeline(prompt: str, model_name_or_path: str, device: str) -> Instance:
     result.generated_text = tokenizer.decode(
         result.hf_generation.generated_tokens
     )
-    result.logit_through_logit_lens = logit_lens(
-        model=model,
-        class_field_names=class_field_names,
-        hidden_states=result.hf_generation.hidden_states,
-    )
+    # result.logit_through_logit_lens = logit_lens(
+    #     model=model,
+    #     class_field_names=class_field_names,
+    #     hidden_states=result.hf_generation.hidden_states,
+    # )
 
     return result
 
@@ -230,10 +232,12 @@ def batch_dim_importance(
 
 
 if __name__ == "__main__":
-    print(
+    result = (
         pipeline(
             "Tokyo is the capital of",
-            "EleutherAI/pythia-14m",
+            # "EleutherAI/pythia-14m",
+            "gpt2",
             device=("cuda" if torch.cuda.is_available() else "cpu"),
-        ).generated_text
+        )
     )
+    embed()

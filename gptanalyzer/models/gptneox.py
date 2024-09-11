@@ -85,9 +85,12 @@ class MyGPTNeoXAttention(GPTNeoXAttention):
         )
 
         self.query_key_value.weight = nn.Parameter(
-            (centering @ torch.diag(ln_weight) @ self.query_key_value.weight.T).T
+            (
+                centering
+                @ torch.diag(ln_weight)
+                @ self.query_key_value.weight.T
+            ).T
         )
-
 
     def split_qkv_weight(self):
         """Prepare QKV weights for attention computation."""
@@ -425,27 +428,28 @@ class MyGPTNeoXForCausalLM(GPTNeoXForCausalLM):
     def __init__(self, config):
         super().__init__(config)
         self.gpt_neox = MyGPTNeoXModel(config)
-        self.embed_out = nn.Linear(config.hidden_size, config.vocab_size, bias=True)
+        self.embed_out = nn.Linear(
+            config.hidden_size, config.vocab_size, bias=True
+        )
 
     def collapse_ln(
         self,
         ln_weight: TensorType[HIDDEN_DIM],
         ln_bias: TensorType[HIDDEN_DIM],
     ):
-        """Collapse weights and biases of ln_f
-        """
+        """Collapse weights and biases of ln_f"""
         centering = (
             torch.diag(torch.ones(ln_weight.shape[0])) - 1 / ln_weight.shape[0]
         )
         centering = centering.to(ln_weight.device)
 
         with torch.no_grad():
-            self.embed_out.bias = nn.Parameter(ln_bias @ self.embed_out.weight.T)
+            self.embed_out.bias = nn.Parameter(
+                ln_bias @ self.embed_out.weight.T
+            )
             self.embed_out.weight = nn.Parameter(
                 (centering @ torch.diag(ln_weight) @ self.embed_out.weight.T).T
             )
-
-
 
 
 def load_model(model_name_or_path):
@@ -464,7 +468,8 @@ def load_model(model_name_or_path):
         # model.transformer.h[i].attn.compute_wvo()
         # model.transformer.h[i].attn.compute_wqk()
     model.collapse_ln(
-        model.gpt_neox.final_layer_norm.weight, model.gpt_neox.final_layer_norm.bias
+        model.gpt_neox.final_layer_norm.weight,
+        model.gpt_neox.final_layer_norm.bias,
     )
     # logger.info("lm_head bias is True to collapse from ln_f.")
     return model

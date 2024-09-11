@@ -14,6 +14,7 @@ logger = init_logging(__name__, log_path=LOG_PATH)
 
 def load_model(
     model_name_or_path: str,
+    device_map: dict|str|None = None,
 ) -> Tuple[MyGPT2LMHeadModel | MyGPTNeoXForCausalLM, dict[str, str]]:
     """Load model with hooks and pre-computed wvo and bvo.
 
@@ -42,7 +43,7 @@ def load_model(
             "ln_f": "ln_f",
             "lm_head": "lm_head",
         }
-        return load_gpt2_model(model_name_or_path), class_field_names
+        return load_gpt2_model(model_name_or_path, device_map=device_map), class_field_names
     if model_name_or_path.startswith("EleutherAI/pythia"):
         class_field_names = {
             "n_layer": "num_hidden_layers",
