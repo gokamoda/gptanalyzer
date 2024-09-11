@@ -84,22 +84,15 @@ class MyGPT2Attention(GPT2Attention):
             hidden_states.transpose(-1, -2),
         )
 
-        attn_weights = compare_score + gate_score.unsqueeze(-2)
+        attn_scores = compare_score + gate_score.unsqueeze(-2)
 
         if self.scale_attn_weights:
-            compare_score = compare_score / torch.full(
-                [],
-                self.head_dim**0.5,
-                dtype=compare_score.dtype,
-                device=compare_score.device,
-            )
-
-            attn_weights = attn_weights / torch.full(
+            attn_scores = attn_scores / torch.full(
                 [],
                 # value.size(-1)
                 self.head_dim**0.5,
-                dtype=attn_weights.dtype,
-                device=attn_weights.device,
+                dtype=attn_scores.dtype,
+                device=attn_scores.device,
             )
 
         # Layer-wise attention scaling
@@ -112,7 +105,7 @@ class MyGPT2Attention(GPT2Attention):
             causal_mask = self.bias[
                 :, :, key_length - query_length : key_length, :key_length
             ]
-            mask_value = torch.finfo(attn_weights.dtype).min
+            mask_value = torch.finfo(attn_scores.dtype).min
             # Need to be a tensor, otherwise we get error:
             #   `RuntimeError: expected scalar type float but found double`.
             # Need to be on the same device, otherwise
@@ -120,23 +113,19 @@ class MyGPT2Attention(GPT2Attention):
             mask_value = torch.full(
                 [],
                 mask_value,
-                dtype=attn_weights.dtype,
-                device=attn_weights.device,
-            )
-            compare_score = torch.where(
-                causal_mask, compare_score.to(compare_score.dtype), mask_value
+                dtype=attn_scores.dtype,
+                device=attn_scores.device,
             )
 
-            attn_weights = torch.where(
-                causal_mask, attn_weights.to(attn_weights.dtype), mask_value
+            attn_scores = torch.where(
+                causal_mask, attn_scores.to(attn_scores.dtype), mask_value
             )
 
         if attention_mask is not None:
             # Apply the attention mask
-            attn_weights = attn_weights + attention_mask
-
-        compare_score = nn.functional.softmax(compare_score, dim=-1)
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1)
+            attn_scores = attn_scores + attention_mask
+        
+        attn_weights = nn.functional.softmax(attn_scores, dim=-1)
 
         # logger.info(gate_score_dim_ablate[0][0])
 
@@ -154,7 +143,7 @@ class MyGPT2Attention(GPT2Attention):
 
         # attn_output = torch.matmul(attn_weights, value)
 
-        return weighted_value, attn_weights
+        return weighted_value, attn_weights, attn_scores
 
     def collapse_ln(
         self,
@@ -246,12 +235,14 @@ class MyGPT2Attention(GPT2Attention):
         (
             weighted_value,
             attn_weights,
+            attn_scores
         ) = self._my_attn(hidden_states, value, attention_mask, head_mask)
 
         # + TATSURO
         _ = self.for_hook(
             attn_weights=attn_weights.detach().to("cpu"),
             weighted_value=weighted_value.detach().to("cpu"),
+            attn_scores=attn_scores.detach().to("cpu"),
             # key=key.detach().to("cpu"),
             # query=query.detach().to("cpu"),
             # original_value=original_value.detach().to("cpu"),

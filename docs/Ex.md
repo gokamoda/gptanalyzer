@@ -1,0 +1,3 @@
+# Doc Example
+
+::: gptanalyzer

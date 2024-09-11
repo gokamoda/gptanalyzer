@@ -15,6 +15,7 @@ class HookResultForAttention:
 
     attn_weights: TensorType[HEAD, SEQUENCE, SEQUENCE] = None
     weighted_value: TensorType[HEAD, SEQUENCE, SEQUENCE, HIDDEN_DIM] = None
+    attn_scores: TensorType[HEAD, SEQUENCE, SEQUENCE] = None
     key: TensorType[HEAD, SEQUENCE, HEAD_DIM] = None
     query: TensorType[HEAD, SEQUENCE, HEAD_DIM] = None
     original_value: TensorType[HEAD, SEQUENCE, HEAD_DIM] = None
@@ -47,6 +48,7 @@ class BatchHookResultForAttention:
     weighted_value: TensorType[BATCH, HEAD, SEQUENCE, SEQUENCE, HIDDEN_DIM] = (
         None
     )
+    attn_scores: TensorType[BATCH, HEAD, SEQUENCE, SEQUENCE] = None
     key: TensorType[BATCH, HEAD, SEQUENCE, HEAD_DIM] = None
     query: TensorType[BATCH, HEAD, SEQUENCE, HEAD_DIM] = None
     original_value: TensorType[BATCH, HEAD, SEQUENCE, HEAD_DIM] = None
@@ -81,6 +83,11 @@ class BatchHookResultForAttention:
             weighted_value=(
                 self.weighted_value[idx]
                 if self.weighted_value is not None
+                else None
+            ),
+            attn_scores=(
+                self.attn_scores[idx]
+                if self.attn_scores is not None
                 else None
             ),
             key=self.key[idx] if self.key is not None else None,
