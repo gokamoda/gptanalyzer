@@ -117,6 +117,8 @@ class MyGPT2Attention(GPT2Attention):
                 device=attn_scores.device,
             )
 
+            causal_mask = causal_mask.to(attn_scores.dtype)
+
             attn_scores = torch.where(
                 causal_mask, attn_scores.to(attn_scores.dtype), mask_value
             )
